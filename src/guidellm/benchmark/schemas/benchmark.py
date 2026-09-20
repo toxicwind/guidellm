@@ -16,7 +16,7 @@ import time
 
 from typing import Any, Literal
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, model_serializer
 
 from guidellm.benchmark.schemas.accumulator import (
     GenerativeBenchmarkAccumulator,
@@ -85,6 +85,19 @@ class GenerativeBenchmark(Benchmark[GenerativeBenchmarkAccumulator]):
             "reported as measurement-instrument readings, not bare scalars."
         ),
     )
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_scoring_fields(self, handler):
+        """Omit scoring-only fields when empty.
+
+        With no scorers configured the report serializes exactly as the
+        pre-scoring schema (no ``quality``/``quality_instrument`` keys).
+        """
+        data = handler(self)
+        for key in ("quality", "quality_instrument"):
+            if not data.get(key):
+                data.pop(key, None)
+        return data
 
     @computed_field  # type: ignore[prop-decorator]
     @property

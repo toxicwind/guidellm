@@ -954,10 +954,10 @@ class GenerativeBenchmarkAccumulator(
                 if aggregate:
                     self._update_quality_total(scorer.name, 0.0)
                 continue
-            stats.scores[result.name] = result.score
-            stats.score_details[result.name] = dict(result.details)
+            stats.scores[scorer.name] = result.score
+            stats.score_details[scorer.name] = dict(result.details)
             if aggregate:
-                self._update_quality_total(result.name, result.score)
+                self._update_quality_total(scorer.name, result.score)
 
     def _update_quality_total(self, name: str, score: float) -> None:
         total = self.quality_totals.setdefault(

@@ -65,9 +65,9 @@ class InstructionFollowingScorer:
     ) -> ScorerResult:
         sentinel = expected if expected is not None else self.sentinel
         details: dict[str, Any] = {"sentinel": sentinel}
-        if not output or sentinel is None:
+        if not output or not sentinel:
             details["match"] = "none"
-            details["reason"] = "no-sentinel" if sentinel is None else "empty-output"
+            details["reason"] = "no-sentinel" if not sentinel else "empty-output"
             return ScorerResult(score=MISS, name=self.name, details=details)
         norm_output = self._normalize(output)
         norm_sentinel = self._normalize(sentinel)
@@ -78,6 +78,7 @@ class InstructionFollowingScorer:
             details["match"] = "contains"
             return ScorerResult(score=CONTAINS, name=self.name, details=details)
         details["match"] = "none"
+        details["reason"] = "no-match"
         return ScorerResult(score=MISS, name=self.name, details=details)
 
 

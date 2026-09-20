@@ -119,8 +119,11 @@ metrics:
 - Benchmark reports gain `quality: {<scorer>: {mean, min, max, n}}` and
   `quality_instrument: {scorer, semantics, thinking_strip, tokenizers,
   ...}` identifying the instrument, scope, and formality tier.
-- With no scorers configured, reports serialize exactly as upstream
-  (scoring fields default to empty and are additive-only).
+- With no scorers configured, reports serialize exactly as upstream:
+  empty scoring-only fields (`quality`, `quality_instrument`, per-request
+  `scores`/`score_details`, config `scorers`/`scorer_config`) are omitted
+  from the JSON, not serialized empty (regression-tested against the
+  pre-scoring schema).
 
 Upstream: [vllm-project/guidellm](https://github.com/vllm-project/guidellm).
 Fork: [toxicwind/guidellm](https://github.com/toxicwind/guidellm).

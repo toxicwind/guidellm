@@ -16,7 +16,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Generic, TypeVar
 
-from pydantic import Field
+from pydantic import Field, model_serializer
 
 from guidellm.scheduler import (
     RequestT,
@@ -121,6 +121,19 @@ class BenchmarkConfig(StandardBaseDict):
             {"instruction_following": {"sentinel": "ABSTRACT-7X3Q", "strip_thinking": True}}
         ],
     )
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_scoring_fields(self, handler):
+        """Omit scoring-only config when empty.
+
+        With no scorers configured the config serializes exactly as the
+        pre-scoring schema (no ``scorers``/``scorer_config`` keys).
+        """
+        data = handler(self)
+        for key in ("scorers", "scorer_config"):
+            if not data.get(key):
+                data.pop(key, None)
+        return data
     profile: dict[str, Any] = Field(
         description="Profile instance coordinating multi-strategy execution",
     )

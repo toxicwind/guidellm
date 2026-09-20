@@ -454,3 +454,289 @@ def test_metrics_args_scorer_defaults_empty():
     args = GenerativeMetricsArgs.model_construct()
     assert args.scorers == []
     assert args.scorer_config == {}
+
+
+# ---------------------------------------------------------------------------
+# No-scorer report shape regression
+#
+# A benchmark compiled with NO scorers configured must serialize to the same
+# JSON shape as the pre-scoring schema (commit 74ec8623^ of toxicwind/guidellm).
+# The scoring feature is additive-only: nothing may be removed or retyped, and
+# the new scoring fields must serialize empty on a no-scorer run.
+#
+# Pre-scoring field lists below were read from
+# `git show 74ec8623^:<path>`:
+#   - src/guidellm/benchmark/schemas/benchmark.py  (GenerativeBenchmark)
+#   - src/guidellm/schemas/base/request_stats.py   (GenerativeRequestStats)
+#   - src/guidellm/benchmark/schemas/base.py       (BenchmarkConfig)
+# ---------------------------------------------------------------------------
+
+from guidellm.benchmark.schemas import (
+    BenchmarkConfig,
+    GenerativeBenchmark,
+    GenerativeBenchmarkAccumulator,
+)
+from guidellm.scheduler import ConcurrentStrategy, SchedulerState
+from guidellm.schemas import (
+    GenerativeRequestStats,
+    RequestInfo,
+    RequestTimings,
+    UsageMetrics,
+)
+
+_BASE_TIME = 1000.0  # non-zero epoch base; a window starting at 0.0 reads unset
+
+
+def _json_type(value) -> str:
+    """Coarse JSON type of a model_dump(mode="json") value."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    raise AssertionError(f"non-JSON value of type {type(value)}: {value!r}")
+
+
+# Pre-scoring (74ec8623^) top-level keys of GenerativeBenchmark -> JSON types.
+_PRE_SCORING_BENCHMARK_TYPES = {
+    "type_": {"string"},
+    "config": {"object"},
+    "scheduler_state": {"object"},
+    "scheduler_metrics": {"object"},
+    "metrics": {"object"},
+    "requests": {"object"},
+    "start_time": {"number"},
+    "end_time": {"number"},
+    "duration": {"number"},
+    "warmup_duration": {"number"},
+    "cooldown_duration": {"number"},
+}
+
+# Pre-scoring (74ec8623^) keys of GenerativeRequestStats -> JSON types.
+_PRE_SCORING_REQUEST_TYPES = {
+    "type_": {"string"},
+    "request_id": {"string"},
+    "response_id": {"string", "null"},
+    "request_args": {"string", "null"},
+    "output": {"string", "null"},
+    "reasoning_output": {"string", "null"},
+    "tool_calls": {"array", "null"},
+    "info": {"object"},
+    "input_metrics": {"object"},
+    "output_metrics": {"object"},
+    "request_start_time": {"number", "null"},
+    "request_end_time": {"number"},
+    "request_latency": {"number", "null"},
+    "request_dispatch_delay": {"number", "null"},
+    "request_scheduled_latency": {"number", "null"},
+    "prompt_tokens": {"integer", "null"},
+    "cached_tokens": {"integer", "null"},
+    "output_tokens": {"integer", "null"},
+    "total_tokens": {"integer", "null"},
+    "time_to_first_token_ms": {"number", "null"},
+    "time_to_last_round_trip_ms": {"number", "null"},
+    "avg_round_trip_time_ms": {"number", "null"},
+    "time_per_output_token_ms": {"number", "null"},
+    "inter_token_latency_ms": {"number", "null"},
+    "tokens_per_second": {"number", "null"},
+    "output_tokens_per_second": {"number", "null"},
+    "time_to_first_output_token_ms": {"number", "null"},
+    "iter_tokens_per_iteration": {"number", "null"},
+    "output_tokens_per_iteration": {"number", "null"},
+}
+
+# Pre-scoring (74ec8623^) keys of BenchmarkConfig (serialized `config` block).
+_PRE_SCORING_CONFIG_KEYS = {
+    "backend",
+    "constraints",
+    "cooldown",
+    "environment",
+    "id_",
+    "prefer_response_metrics",
+    "profile",
+    "requests",
+    "run_id",
+    "run_index",
+    "sample_size",
+    "slo",
+    "strategy",
+    "warmup",
+}
+
+# The only additive fields the scoring feature may introduce (all empty when
+# no scorers are configured).
+# With conditional omission, a no-scorer run serializes with ZERO schema
+# deltas vs the pre-scoring schema: scoring-only fields are omitted when empty.
+_ADDITIVE_TOP_LEVEL: set = set()
+_ADDITIVE_REQUEST: set = set()
+_ADDITIVE_CONFIG: set = set()
+
+
+def _compile_no_scorer_benchmark() -> GenerativeBenchmark:
+    """Compile a real benchmark through the accumulator with scoring disabled.
+
+    No live backend: one synthetic completed request, no `scorers` passed to
+    BenchmarkConfig so the scoring defaults (empty) apply end to end.
+    """
+    timings = RequestTimings(
+        resolve_start=_BASE_TIME,
+        resolve_end=_BASE_TIME + 0.5,
+        request_start=_BASE_TIME,
+        request_end=_BASE_TIME + 0.5,
+    )
+    stats = GenerativeRequestStats(
+        request_id="req-shape-1",
+        request_args="--prompt hello",
+        output="hello world",
+        info=RequestInfo(
+            request_id="req-shape-1", status="completed", timings=timings
+        ),
+        input_metrics=UsageMetrics(text_tokens=8),
+        output_metrics=UsageMetrics(text_tokens=16),
+    )
+    accumulator = GenerativeBenchmarkAccumulator(
+        config=BenchmarkConfig(
+            run_id="shape-regression",
+            run_index=0,
+            strategy=ConcurrentStrategy(streams=1),
+            constraints={},
+            profile={},
+            requests={},
+            backend={},
+            environment={},
+            # scorers / scorer_config intentionally omitted -> disabled
+        )
+    )
+    accumulator.timings.measure_start = _BASE_TIME
+    accumulator.timings.measure_end = _BASE_TIME + 10.0
+    accumulator.completed.requests_stats = [stats]
+    return GenerativeBenchmark.compile(
+        accumulator=accumulator, scheduler_state=SchedulerState()
+    )
+
+
+def _assert_shape_matches(payload: dict, pre_scoring_types: dict, additive: set):
+    pre_keys = set(pre_scoring_types)
+    actual_keys = set(payload)
+    removed = sorted(pre_keys - actual_keys)
+    assert not removed, f"pre-scoring keys removed by scoring feature: {removed}"
+    added = actual_keys - pre_keys
+    assert added == additive, (
+        f"unexpected schema deltas vs pre-scoring (74ec8623^): {sorted(added)}; "
+        f"allowed additive fields: {sorted(additive)}"
+    )
+    mistyped = {
+        key: _json_type(payload[key])
+        for key in sorted(pre_keys)
+        if _json_type(payload[key]) not in pre_scoring_types[key]
+    }
+    assert not mistyped, (
+        "pre-scoring keys retyped by scoring feature "
+        f"(key -> observed JSON type): {mistyped}"
+    )
+
+
+def test_no_scorer_benchmark_top_level_shape_matches_pre_scoring_schema():
+    """Top-level JSON shape of a no-scorer run == pre-scoring schema EXACTLY:
+    empty scoring fields are omitted, not serialized empty."""
+    report = _compile_no_scorer_benchmark().model_dump(mode="json")
+    _assert_shape_matches(report, _PRE_SCORING_BENCHMARK_TYPES, _ADDITIVE_TOP_LEVEL)
+    assert "quality" not in report
+    assert "quality_instrument" not in report
+
+
+def test_no_scorer_request_shape_matches_pre_scoring_schema():
+    """Per-request JSON shape of a no-scorer run == pre-scoring schema EXACTLY:
+    empty scoring fields are omitted, not serialized empty."""
+    benchmark = _compile_no_scorer_benchmark()
+    successful = benchmark.requests.successful
+    assert len(successful) >= 1, "need at least one request to check the shape"
+    for stats in successful:
+        payload = stats.model_dump(mode="json")
+        _assert_shape_matches(payload, _PRE_SCORING_REQUEST_TYPES, _ADDITIVE_REQUEST)
+        assert "scores" not in payload
+        assert "score_details" not in payload
+
+
+def test_empty_string_sentinel_scores_zero():
+    # Scout finding 1: sentinel="" must behave as "no sentinel configured"
+    # (0.0), never as a perfect 2.0 on whitespace-only output.
+    scorer = InstructionFollowingScorer(sentinel="")
+    assert scorer.score("   ").score == 0.0
+    assert scorer.score("   ").details["reason"] == "no-sentinel"
+    assert scorer.score("anything").score == 0.0
+
+
+def test_miss_path_details_carry_reason():
+    # Scout finding 8: the plain-miss path sets details["reason"] like the
+    # other "none" paths, so consumers can rely on the key.
+    scorer = InstructionFollowingScorer(sentinel=SENTINEL)
+    details = scorer.score("unrelated text").details
+    assert details["match"] == "none"
+    assert details["reason"] == "no-match"
+
+
+def test_scorer_name_keying_consistent_on_exception_and_success():
+    # Scout finding 2: scores/details/totals key by scorer.name on both the
+    # success path and the exception path (was result.name on success).
+    class Renamer:
+        name = "renamer"
+
+        def __init__(self, fail=False):
+            self.fail = fail
+
+        def score(self, output, expected=None, context=None):
+            if self.fail:
+                raise RuntimeError("kaput")
+            return ScorerResult(score=1.0, name="renamed", details={})
+
+    acc = _make_accumulator([Renamer(fail=False)])
+    stats = _make_stats(SENTINEL)
+    acc._score_request(stats)
+    assert set(stats.scores) == {"renamer"}
+    assert set(stats.score_details) == {"renamer"}
+    assert set(acc.quality_totals) == {"renamer"}
+
+    acc2 = _make_accumulator([Renamer(fail=True)])
+    stats2 = _make_stats(SENTINEL)
+    acc2._score_request(stats2)
+    assert set(stats2.scores) == {"renamer"}
+    assert set(stats2.score_details) == {"renamer"}
+    assert set(acc2.quality_totals) == {"renamer"}
+
+
+def test_chars_removed_ignores_whitespace_normalization():
+    # Scout finding 3: chars_removed measures block markup only; a padded
+    # answer with no blocks reports 0 even though ends are trimmed.
+    inner = InstructionFollowingScorer(sentinel=SENTINEL)
+    scorer = ThinkingBlockStripper(inner)
+    result = scorer.score("  " + SENTINEL + "  ")
+    assert result.details["stripped"] is False
+    assert result.details["chars_removed"] == 0
+    assert result.score == 2.0
+
+
+def test_no_scorer_config_additive_scoring_keys_only():
+    """The serialized `config` block matches the pre-scoring config keys
+    EXACTLY: empty scoring config keys are omitted, not serialized empty."""
+    report = _compile_no_scorer_benchmark().model_dump(mode="json")
+    config = report["config"]
+    assert _PRE_SCORING_CONFIG_KEYS <= set(config), (
+        "pre-scoring config keys removed: "
+        f"{sorted(_PRE_SCORING_CONFIG_KEYS - set(config))}"
+    )
+    added = set(config) - _PRE_SCORING_CONFIG_KEYS
+    assert added == _ADDITIVE_CONFIG, (
+        f"unexpected config deltas vs pre-scoring (74ec8623^): {sorted(added)}"
+    )
+    assert "scorers" not in config
+    assert "scorer_config" not in config
