@@ -14,7 +14,7 @@ from .protocol import Scorer, ScorerResult
 
 __all__ = ["strip_thinking_blocks", "ThinkingBlockStripper"]
 
-DEFAULT_TAGS = ("think", "reasoning", "thought", "scratchpad")
+DEFAULT_TAGS = ("think", "thinking", "reasoning", "thought", "scratchpad")
 
 
 def _remove_blocks(text: str, tags: tuple[str, ...]) -> tuple[str, bool]:
@@ -22,9 +22,17 @@ def _remove_blocks(text: str, tags: tuple[str, ...]) -> tuple[str, bool]:
 
     Handles ``<tag>...</tag>`` spans (case-insensitive), true nesting
     (innermost pairs removed first via a tempered pattern, repeated to a
-    fixpoint), orphan closing tags left by malformed nesting, unclosed
-    opening tags (stripped to end of text), and fenced `````thinking```
-    blocks. No whitespace normalization is applied here.
+    fixpoint), self-closing ``<tag/>`` empty elements (tag alone removed),
+    orphan closing tags left by malformed nesting, unclosed opening tags
+    (stripped to end of text), and fenced `````thinking``` blocks. No
+    whitespace normalization is applied here.
+
+    Malformed-input contract: a self-closing tag is a complete empty
+    element, so only the tag itself is removed and following content is
+    preserved. A genuinely unclosed opening tag is treated as malformed
+    thinking that invalidates the rest of the output (stripped to end).
+    An unclosed fenced block is left untouched: its extent is unknowable
+    and stripping to end would risk discarding real answer content.
     """
     stripped_any = False
     stripped = text
@@ -48,9 +56,19 @@ def _remove_blocks(text: str, tags: tuple[str, ...]) -> tuple[str, bool]:
             r"</" + tag + r"\s*>", "", stripped, flags=re.IGNORECASE
         )
         stripped, stripped_any = new, stripped_any or n > 0
-        # Unclosed opening tag: strip to end of text
+        # Self-closing tag (<tag/>): an empty element. Remove the tag
+        # alone; following content is real answer text, never thinking.
         new, n = re.subn(
-            r"<" + tag + r"\b[^>]*>.*$",
+            r"<" + tag + r"\b[^>]*/>",
+            "",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+        stripped, stripped_any = new, stripped_any or n > 0
+        # Unclosed opening tag: strip to end of text. The (?<!/) guard keeps
+        # self-closing tags out of this rule even if one survived above.
+        new, n = re.subn(
+            r"<" + tag + r"\b[^>]*(?<!/)>.*$",
             "",
             stripped,
             flags=re.IGNORECASE | re.DOTALL,
@@ -88,7 +106,8 @@ def _strip_blocks(text: str, tags: tuple[str, ...]) -> tuple[str, bool]:
 def strip_thinking_blocks(text: str, tags: tuple[str, ...] = DEFAULT_TAGS) -> str:
     """Remove reasoning blocks from text.
 
-    Handles ``<tag>...</tag>`` spans (case-insensitive, non-greedy), markdown
+    Handles ``<tag>...</tag>`` spans (case-insensitive, non-greedy),
+    self-closing ``<tag/>`` empty elements (tag alone removed), markdown
     fenced `````thinking`` blocks, and unclosed opening tags (stripped to end
     of text). Also collapses 3+ newlines and trims the ends.
     """

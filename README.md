@@ -87,10 +87,11 @@ alongside the performance numbers.
   deterministic sentinel scoring: exact normalized match = `2.0`,
   sentinel present with extra text = `1.0`, missing/empty/error = `0.0`.
 - `guidellm.benchmark.scoring.adapters.ThinkingBlockStripper` — composable
-  adapter that strips `<think>`, `<reasoning>`, `<thought>`,
+  adapter that strips `<think>`, `<thinking>`, `<reasoning>`, `<thought>`,
   `<scratchpad>`, and fenced thinking blocks (true nesting innermost-first,
-  orphan closers removed, unclosed openers strip to end of output) before
-  delegating to the wrapped scorer. Reports under
+  orphan closers removed, self-closing `<tag/>` empty elements drop the tag
+  alone, unclosed openers strip to end of output, unclosed fenced blocks are
+  left untouched) before delegating to the wrapped scorer. Reports under
   `<scorer>_nothink` with `stripped: bool` in details.
 
 ### Wiring it in a scenario

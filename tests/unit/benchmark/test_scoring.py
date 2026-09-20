@@ -87,7 +87,7 @@ def test_instruction_result_carries_scorer_name():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("tag", ["think", "reasoning", "thought", "scratchpad"])
+@pytest.mark.parametrize("tag", ["think", "thinking", "reasoning", "thought", "scratchpad"])
 def test_strip_thinking_blocks_each_tag(tag):
     text = f"before <{tag}>internal monologue</{tag}> after"
     assert strip_thinking_blocks(text) == "before  after"
@@ -128,6 +128,44 @@ def test_strip_thinking_blocks_nested_keeps_between_blocks():
 def test_strip_thinking_blocks_unclosed_tag_strips_to_end():
     text = "answer here <reasoning>never closed..."
     assert strip_thinking_blocks(text) == "answer here"
+
+
+def test_strip_thinking_blocks_self_closing_removes_tag_only():
+    # <tag/> is a complete empty element: the tag alone goes, the answer
+    # that follows is preserved (regression: this used to strip to EOF).
+    assert strip_thinking_blocks("<think/>" + SENTINEL) == SENTINEL
+    assert strip_thinking_blocks("A <think /> B") == "A  B"
+
+
+def test_strip_thinking_blocks_self_closing_with_attributes():
+    assert strip_thinking_blocks('<think effort="high"/>' + SENTINEL) == SENTINEL
+
+
+def test_strip_thinking_blocks_self_closing_not_treated_as_unclosed():
+    # The (?<!/) guard: even a surviving self-closer never triggers the
+    # strip-to-end rule.
+    text = "<think/>keep this"
+    assert strip_thinking_blocks(text) == "keep this"
+
+
+def test_strip_thinking_blocks_thinking_tag_paired():
+    text = "<thinking>deliberation</thinking>" + SENTINEL
+    assert strip_thinking_blocks(text) == SENTINEL
+
+
+def test_strip_thinking_blocks_unclosed_fenced_left_alone():
+    # Unclosed fenced block: extent unknowable, left untouched rather than
+    # risk discarding real answer content.
+    text = "```thinking\nunclosed..."
+    assert strip_thinking_blocks(text) == text
+
+
+def test_adapter_self_closing_preserves_answer_score():
+    inner = InstructionFollowingScorer(sentinel=SENTINEL)
+    scorer = ThinkingBlockStripper(inner)
+    result = scorer.score("<think/>" + SENTINEL)
+    assert result.score == 2.0
+    assert result.details["stripped"] is True
 
 
 def test_strip_thinking_blocks_fenced():

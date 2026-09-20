@@ -6,8 +6,9 @@ Built-in scorers:
                            1.0 contains-with-extra, 0.0 miss.
 
 Adapters:
-    ThinkingBlockStripper  removes <think>/<reasoning>/<thought>/<scratchpad>
-                           spans and fenced thinking blocks before delegating
+    ThinkingBlockStripper  removes <think>/<thinking>/<reasoning>/
+                           <thought>/<scratchpad> spans and fenced thinking
+                           blocks before delegating
                            to an inner scorer. Enabled per scorer with
                            ``strip_thinking: true`` in ``scorer_config``.
 """
