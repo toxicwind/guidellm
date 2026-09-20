@@ -18,7 +18,10 @@ from typing import Any
 import httpx
 
 from guidellm.backends.backend import Backend
-from guidellm.backends.openai.common import FALLBACK_TIMEOUT
+from guidellm.backends.openai.common import (
+    FALLBACK_TIMEOUT,
+    resolve_validate_kwargs,
+)
 from guidellm.backends.openai.request_handlers import (
     OpenAIRequestHandler,
     OpenAIRequestHandlerFactory,
@@ -128,14 +131,15 @@ class OpenAIHTTPBackend(Backend):
         if self._async_client is None:
             raise RuntimeError("Backend not started up for process.")
 
-        if not self._args.validate_backend:
+        validate_kwargs = resolve_validate_kwargs(
+            self._args.validate_backend,
+            self._args.target,
+            self._args.api_routes,
+        )
+        if validate_kwargs is None:
             return
 
         try:
-            validate_kwargs: dict[str, Any] = {
-                "method": "GET",
-                "url": f"{self._args.target}/{self._args.api_routes['/health']}",
-            }
             existing_headers = validate_kwargs.get("headers")
             built_headers = self._build_headers(existing_headers)
             validate_kwargs["headers"] = built_headers

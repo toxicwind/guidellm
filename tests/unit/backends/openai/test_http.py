@@ -135,22 +135,15 @@ class TestOpenAIHTTPBackend:
 
     @pytest.mark.sanity
     def test_invalid_validate_backend_parameter(self):
-        """Test OpenAIHTTPBackend with invalid validate_backend parameter types."""
-        # Dict is not a valid bool — raises ValidationError
-        with pytest.raises(ValidationError):
-            _make_backend(
-                target="http://localhost:8000",
-                validate_backend={"method": "GET"},  # type: ignore[arg-type]
-            )
-
-        # Integer is not a valid bool coercion for non-0/1 values — depends on Pydantic
-        # The field is typed as bool, so Pydantic may accept 0/1 as False/True
-        # Test with a non-bool object that can't coerce
-        with pytest.raises((ValidationError, TypeError)):
-            _make_backend(
-                target="http://localhost:8000",
-                validate_backend="not-a-bool",  # type: ignore[arg-type]
-            )
+        """Test OpenAIHTTPBackend rejects non-bool/str/dict validate_backend types."""
+        # str (route key / URL) and dict (raw httpx kwargs) are valid;
+        # int and list are not coercible to bool | str | dict[str, Any]
+        for bad in (5, ["GET"]):
+            with pytest.raises(ValidationError):
+                _make_backend(
+                    target="http://localhost:8000",
+                    validate_backend=bad,  # type: ignore[arg-type]
+                )
 
     @pytest.mark.sanity
     def test_server_history_requires_responses_api(self):
@@ -267,16 +260,25 @@ class TestOpenAIHTTPBackend:
         [
             (True, True),
             (False, False),
+            ("/v1/models", "/v1/models"),
+            ("https://example.com/probe", "https://example.com/probe"),
+            (
+                {"method": "GET", "url": "https://example.com/probe"},
+                {"method": "GET", "url": "https://example.com/probe"},
+            ),
         ],
         ids=[
             "bool_true",
             "bool_false",
+            "route_key",
+            "full_url",
+            "dict_kwargs",
         ],
     )
     def test_validate_backend_parameter(
         self, validate_backend, expected_validate_backend
     ):
-        """Test validate_backend parameter stores boolean value."""
+        """Test validate_backend parameter stores bool/str/dict value."""
         backend = _make_backend(
             target="http://test",
             validate_backend=validate_backend,
@@ -420,6 +422,42 @@ class TestOpenAIHTTPBackend:
         await backend.process_startup()
 
         await backend.validate()  # Should not raise
+
+    @pytest.mark.regression
+    @pytest.mark.asyncio
+    @async_timeout(10.0)
+    async def test_validate_route_key(self, httpx_mock: HTTPXMock):
+        """Test validate() resolves a route key against api_routes."""
+        httpx_mock.add_response(
+            url="http://test/v1/models",
+            method="GET",
+            headers={},
+        )
+
+        backend = _make_backend(target="http://test", validate_backend="/v1/models")
+        await backend.process_startup()
+
+        await backend.validate()  # Should not raise
+        assert str(httpx_mock.get_requests()[-1].url) == "http://test/v1/models"
+
+    @pytest.mark.regression
+    @pytest.mark.asyncio
+    @async_timeout(10.0)
+    async def test_validate_full_url(self, httpx_mock: HTTPXMock):
+        """Test validate() uses a full URL string as-is."""
+        httpx_mock.add_response(
+            url="https://example.com/probe",
+            method="GET",
+            headers={},
+        )
+
+        backend = _make_backend(
+            target="http://test", validate_backend="https://example.com/probe"
+        )
+        await backend.process_startup()
+
+        await backend.validate()  # Should not raise
+        assert str(httpx_mock.get_requests()[-1].url) == "https://example.com/probe"
 
     @pytest.mark.regression
     @pytest.mark.asyncio

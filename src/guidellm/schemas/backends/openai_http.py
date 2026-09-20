@@ -4,7 +4,7 @@ OpenAI HTTP backend Args schema.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 
@@ -101,9 +101,14 @@ class OpenAIHTTPBackendArgs(BackendArgs):
         default=False,
         description="Verify the server's TLS certificate.",
     )
-    validate_backend: bool = Field(
+    validate_backend: bool | str | dict[str, Any] = Field(
         default=True,
-        description="Send a health check request to validate backend configuration.",
+        description=(
+            "Validate backend connectivity before benchmarking. True sends a "
+            "GET against the '/health' route key, a string selects an "
+            "api_routes key or a full URL, and a dict supplies raw httpx "
+            "request kwargs. False skips validation."
+        ),
     )
     stream: bool = Field(
         default=True,
