@@ -294,6 +294,54 @@ class TestOpenAIHTTPBackend:
         assert backend._args.openai_strict_compat is True
 
     @pytest.mark.sanity
+    @pytest.mark.asyncio
+    @async_timeout(10.0)
+    async def test_strict_compat_forwarded_to_handler(self, mock_request_handler):
+        """Backend forwards openai_strict_compat=True to handler format()."""
+        backend = _make_backend(
+            target="http://test",
+            model="test-model",
+            openai_strict_compat=True,
+        )
+        mock_handler, handler_patch = mock_request_handler
+
+        with handler_patch:
+            await backend._prepare_resolve_request(GenerationRequest())
+
+        assert mock_handler.format.call_args.kwargs["openai_strict_compat"] is True
+
+    @pytest.mark.sanity
+    @pytest.mark.asyncio
+    @async_timeout(10.0)
+    async def test_strict_compat_default_forwarded_to_handler(
+        self, mock_request_handler
+    ):
+        """Backend forwards openai_strict_compat=False by default."""
+        backend = _make_backend(target="http://test", model="test-model")
+        mock_handler, handler_patch = mock_request_handler
+
+        with handler_patch:
+            await backend._prepare_resolve_request(GenerationRequest())
+
+        assert mock_handler.format.call_args.kwargs["openai_strict_compat"] is False
+
+    @pytest.mark.sanity
+    def test_build_headers_preserves_auth_and_merges(self):
+        """_build_headers keeps Bearer auth and merges handler headers."""
+        backend = _make_backend(target="http://test", api_key="fake-key")
+        headers = backend._build_headers({"X-Custom": "v"})
+        assert headers["Authorization"] == "Bearer fake-key"
+        assert headers["X-Custom"] == "v"
+        # user-provided headers take precedence over the Bearer <redacted>
+        headers = backend._build_headers({"Authorization": "Bearer other"})
+        assert headers["Authorization"] == "Bearer other"
+        # no key: no auth header, handler headers still pass through
+        backend = _make_backend(target="http://test")
+        headers = backend._build_headers({"X-Custom": "v"})
+        assert "Authorization" not in headers
+        assert headers["X-Custom"] == "v"
+
+    @pytest.mark.sanity
     def test_target_normalization(self):
         """Test target URL normalization."""
         # Remove trailing slashes and /v1
