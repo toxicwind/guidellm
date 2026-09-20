@@ -102,6 +102,25 @@ class BenchmarkConfig(StandardBaseDict):
             "toward goodput. None disables goodput measurement"
         ),
     )
+    scorers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of response-quality scorers to run on each completed "
+            "request output, in scoring order. Empty disables scoring."
+        ),
+        examples=[["instruction_following"]],
+    )
+    scorer_config: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-scorer constructor kwargs keyed by scorer name. The "
+            "'strip_thinking' key wraps the scorer in a ThinkingBlockStripper "
+            "so reasoning models are graded on their answer text."
+        ),
+        examples=[
+            {"instruction_following": {"sentinel": "ABSTRACT-7X3Q", "strip_thinking": True}}
+        ],
+    )
     profile: dict[str, Any] = Field(
         description="Profile instance coordinating multi-strategy execution",
     )

@@ -62,6 +62,13 @@ class GenerativeRequestStats(StandardBaseDict):
         default=None,
         description="Raw tool call payloads from the model response in OpenAI format",
     )
+    scores: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Quality scores for this request keyed by scorer name. "
+            "Populated only when scorers are configured on the benchmark."
+        ),
+    )
     info: RequestInfo = Field(description="Request metadata and timing information")
     input_metrics: UsageMetrics = Field(
         description="Token usage statistics for the input prompt"

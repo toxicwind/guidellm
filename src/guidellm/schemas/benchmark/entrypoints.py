@@ -143,6 +143,29 @@ class GenerativeMetricsArgs(MetricsArgs):
         ),
         examples=[None, {"ttft_ms": 2000, "tpot_ms": 100}],
     )
+    scorers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Response-quality scorers to run on each completed request output, "
+            "in scoring order. Example: --scorers instruction_following. "
+            "Empty disables scoring."
+        ),
+        examples=[["instruction_following"]],
+        json_schema_extra={"argument_alias": "scorer"},
+    )
+    scorer_config: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-scorer constructor kwargs keyed by scorer name, as JSON. "
+            "Example: --scorer-config "
+            "{instruction_following: {sentinel: ABSTRACT-7X3Q, strip_thinking: true}} "
+            "(use valid JSON with double quotes)."
+        ),
+        examples=[
+            {"instruction_following": {"sentinel": "ABSTRACT-7X3Q", "strip_thinking": True}}
+        ],
+        json_schema_extra={"argument_alias": "scorer-config"},
+    )
 
 
 class BenchmarkArgs(ReloadableBaseModel):

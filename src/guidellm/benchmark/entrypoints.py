@@ -558,6 +558,8 @@ async def benchmark_generative_text(
         warmup=warmup,
         cooldown=cooldown,
         prefer_response_metrics=metrics_args.prefer_response_metrics,
+        scorers=metrics_args.scorers,
+        scorer_config=metrics_args.scorer_config,
         slo=metrics_args.slo,
     ):
         if benchmark:

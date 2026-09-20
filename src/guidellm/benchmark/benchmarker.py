@@ -14,7 +14,7 @@ import asyncio
 import uuid
 from abc import ABC
 from collections.abc import AsyncIterator, Awaitable
-from typing import Generic
+from typing import Any, Generic
 
 from guidellm.benchmark.profiles import Profile
 from guidellm.benchmark.progress import BenchmarkerProgress
@@ -67,6 +67,8 @@ class Benchmarker(
         cooldown: TransientPhaseConfig,
         sample_size: int | None = None,
         prefer_response_metrics: bool = True,
+        scorers: list[str] | None = None,
+        scorer_config: dict[str, dict[str, Any]] | None = None,
         progress: (
             list[BenchmarkerProgress[BenchmarkAccumulatorT, BenchmarkT]] | None
         ) = None,
@@ -88,6 +90,8 @@ class Benchmarker(
             None keeps all, 0 strips all, N > 0 uses reservoir sampling.
         :param prefer_response_metrics: Whether to prefer response metrics over
             request metrics, defaults to True
+        :param scorers: Response-quality scorer names to run per request
+        :param scorer_config: Per-scorer constructor kwargs keyed by scorer name
         :param progress: Independent trackers notified concurrently for lifecycle events
         :param slo: Per-request latency objectives defining which requests count
             toward goodput, or None to disable goodput measurement
@@ -130,6 +134,8 @@ class Benchmarker(
                     warmup=warmup,
                     cooldown=cooldown,
                     prefer_response_metrics=prefer_response_metrics,
+                    scorers=scorers or [],
+                    scorer_config=scorer_config or {},
                     slo=slo,
                     profile=InfoMixin.extract_from_obj(profile),
                     requests=InfoMixin.extract_from_obj(requests),

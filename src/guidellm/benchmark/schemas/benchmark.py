@@ -12,7 +12,9 @@ domain-specific metrics for text, image, video, and audio generation tasks.
 
 from __future__ import annotations
 
-from typing import Literal
+import time
+
+from typing import Any, Literal
 
 from pydantic import Field, computed_field
 
@@ -65,6 +67,22 @@ class GenerativeBenchmark(Benchmark[GenerativeBenchmarkAccumulator]):
     ] = Field(
         description=(
             "Request details grouped by status: successful, incomplete, errored"
+        ),
+    )
+    quality: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-scorer quality aggregates over all scored requests: "
+            "{mean, min, max, n} keyed by scorer name. Empty when no "
+            "scorers were configured."
+        ),
+    )
+    quality_instrument: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Instrument metadata for the quality scores: scorer names, "
+            "formality tier, scope, and compilation timestamp. Scores are "
+            "reported as measurement-instrument readings, not bare scalars."
         ),
     )
 
@@ -148,6 +166,7 @@ class GenerativeBenchmark(Benchmark[GenerativeBenchmarkAccumulator]):
         :param scheduler_state: Final scheduler state after execution completion
         :return: Compiled generative benchmark instance with complete metrics
         """
+        quality, quality_instrument = cls._compile_quality(accumulator)
         return GenerativeBenchmark(
             config=accumulator.config,
             scheduler_state=scheduler_state,
@@ -159,4 +178,37 @@ class GenerativeBenchmark(Benchmark[GenerativeBenchmarkAccumulator]):
                 errored=accumulator.errored.get_sampled(),
                 total=None,
             ),
+            quality=quality,
+            quality_instrument=quality_instrument,
         )
+
+    @staticmethod
+    def _compile_quality(
+        accumulator: GenerativeBenchmarkAccumulator,
+    ) -> tuple[dict[str, dict[str, float]], dict[str, Any]]:
+        """Aggregate per-scorer quality totals into report-ready summaries.
+
+        Returns (quality, quality_instrument). Instrument metadata records
+        the scorer names, formality tier, scope and timestamp alongside the
+        numbers: scores are instrument readings, not bare scalars.
+        """
+        quality: dict[str, dict[str, float]] = {}
+        for scorer_name, total in accumulator.quality_totals.items():
+            n = total["n"]
+            quality[scorer_name] = {
+                "mean": total["sum"] / n if n else 0.0,
+                "min": total["min"] if n else 0.0,
+                "max": total["max"] if n else 0.0,
+                "n": n,
+            }
+        instrument = (
+            {
+                "scorers": sorted(accumulator.quality_totals),
+                "formality_tier": "deterministic-instrument",
+                "scope": "benchmark completed requests",
+                "compiled_at": time.time(),
+            }
+            if quality
+            else {}
+        )
+        return quality, instrument

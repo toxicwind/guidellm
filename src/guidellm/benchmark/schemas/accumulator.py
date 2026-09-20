@@ -15,9 +15,9 @@ from __future__ import annotations
 import random
 import time
 from collections.abc import Callable
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 from guidellm.benchmark.schemas.base import BenchmarkAccumulator, BenchmarkConfig
 from guidellm.scheduler import SchedulerState
@@ -838,6 +838,16 @@ class GenerativeBenchmarkAccumulator(
         default_factory=GenerativeMetricsAccumulator,
         description="Running metrics for incomplete requests",
     )
+    quality_totals: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description=(
+            "Running quality aggregates per scorer name: "
+            "{sum, min, max, n} over all scored requests. Survives "
+            "output clearing and reservoir sampling."
+        ),
+    )
+
+    _scorers: list = PrivateAttr(default_factory=list)
 
     def model_post_init(self, __context):
         """
@@ -853,6 +863,12 @@ class GenerativeBenchmarkAccumulator(
         self.completed.sample_size = self.config.sample_size
         self.errored.sample_size = self.config.sample_size
         self.incomplete.sample_size = self.config.sample_size
+
+        # Resolve the scorer pipeline once per benchmark run. Unknown names
+        # raise KeyError here (fail fast) rather than mid-run.
+        from guidellm.benchmark.scoring import resolve_scorers
+
+        self._scorers = resolve_scorers(self.config.scorers, self.config.scorer_config)
 
     def update_estimate(
         self,
@@ -903,6 +919,32 @@ class GenerativeBenchmarkAccumulator(
         stats = requests_accumulator.update_estimate(
             response, request, info, self.config.prefer_response_metrics
         )
+        self._score_request(stats)
         metrics_accumulator.update_estimate(stats, duration)
         self.total_metrics.update_estimate(stats, duration)
         self.scheduler_metrics.update_estimate(scheduler_state, stats)
+
+    def _score_request(self, stats: GenerativeRequestStats) -> None:
+        """Run configured scorers on one request's output.
+
+        Scoring failures never fail the benchmark: the request records 0.0
+        for that scorer. Aggregate totals are updated here so they survive
+        output clearing and reservoir sampling.
+        """
+        if not self._scorers or not stats.output:
+            return
+        for scorer in self._scorers:
+            try:
+                result = scorer.score(stats.output)
+            except Exception:  # noqa: BLE001 - scoring must not fail a benchmark
+                stats.scores[scorer.name] = 0.0
+                continue
+            stats.scores[result.name] = result.score
+            total = self.quality_totals.setdefault(
+                result.name,
+                {"sum": 0.0, "min": float("inf"), "max": float("-inf"), "n": 0.0},
+            )
+            total["sum"] += result.score
+            total["n"] += 1.0
+            total["min"] = min(total["min"], result.score)
+            total["max"] = max(total["max"], result.score)
