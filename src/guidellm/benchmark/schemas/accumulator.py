@@ -919,20 +919,26 @@ class GenerativeBenchmarkAccumulator(
         stats = requests_accumulator.update_estimate(
             response, request, info, self.config.prefer_response_metrics
         )
-        self._score_request(stats)
+        self._score_request(stats, aggregate=info.status == "completed")
         metrics_accumulator.update_estimate(stats, duration)
         self.total_metrics.update_estimate(stats, duration)
         self.scheduler_metrics.update_estimate(scheduler_state, stats)
 
-    def _score_request(self, stats: GenerativeRequestStats) -> None:
+    def _score_request(
+        self, stats: GenerativeRequestStats, aggregate: bool = True
+    ) -> None:
         """Run configured scorers on one request's output.
 
         Scoring failures never fail the benchmark: the request records 0.0
-        for that scorer, the zero contributes to the aggregates, and the
-        error is persisted in ``stats.score_details``. Empty or missing
-        output is scored normally (deterministic scorers grade it 0.0) --
-        absence of a response is itself a measurement. Aggregate totals are
-        updated here so they survive output clearing and reservoir sampling.
+        for that scorer and the error is persisted in
+        ``stats.score_details``. Empty or missing output is scored normally
+        (deterministic scorers grade it 0.0) -- absence of a response is
+        itself a measurement. When ``aggregate`` is true (completed
+        requests), the score also contributes to the quality totals, which
+        are updated here so they survive output clearing and reservoir
+        sampling. Transport-errored requests are scored for the record but
+        do not move the quality aggregates: provider failures are
+        reliability signal, not instruction-following signal.
         """
         if not self._scorers:
             return
@@ -945,11 +951,13 @@ class GenerativeBenchmarkAccumulator(
                     "error": f"{type(exc).__name__}: {exc}",
                     "score": 0.0,
                 }
-                self._update_quality_total(scorer.name, 0.0)
+                if aggregate:
+                    self._update_quality_total(scorer.name, 0.0)
                 continue
             stats.scores[result.name] = result.score
             stats.score_details[result.name] = dict(result.details)
-            self._update_quality_total(result.name, result.score)
+            if aggregate:
+                self._update_quality_total(result.name, result.score)
 
     def _update_quality_total(self, name: str, score: float) -> None:
         total = self.quality_totals.setdefault(

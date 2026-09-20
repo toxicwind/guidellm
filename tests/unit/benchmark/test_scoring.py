@@ -337,6 +337,38 @@ def test_score_request_failure_records_zero_not_raise():
     assert "boom" in stats.score_details["exploding"]["error"]
 
 
+def test_score_request_aggregate_false_records_scores_not_totals():
+    """Errored requests: scored for the record, excluded from aggregates."""
+    acc = _make_accumulator([InstructionFollowingScorer(sentinel="ABSTRACT-7X3Q")])
+    stats = _make_stats("ABSTRACT-7X3Q")
+    acc._score_request(stats, aggregate=False)
+    assert stats.scores == {"instruction_following": 2.0}
+    assert stats.score_details["instruction_following"]["match"] == "exact"
+    assert acc.quality_totals == {}
+
+
+def test_score_request_aggregate_false_exception_still_zero_no_total():
+    class Exploding:
+        name = "exploding"
+
+        def score(self, output, expected=None, context=None):
+            raise RuntimeError("boom")
+
+    acc = _make_accumulator([Exploding()])
+    stats = _make_stats("whatever")
+    acc._score_request(stats, aggregate=False)
+    assert stats.scores == {"exploding": 0.0}
+    assert "RuntimeError" in stats.score_details["exploding"]["error"]
+    assert acc.quality_totals == {}
+
+
+def test_score_request_aggregate_true_default_unchanged():
+    acc = _make_accumulator([InstructionFollowingScorer(sentinel="ABSTRACT-7X3Q")])
+    stats = _make_stats("ABSTRACT-7X3Q")
+    acc._score_request(stats)  # default aggregate=True
+    assert acc.quality_totals["instruction_following"]["n"] == 1.0
+
+
 def test_score_request_persists_details():
     acc = _make_accumulator(
         [ThinkingBlockStripper(InstructionFollowingScorer(sentinel=SENTINEL))]
