@@ -10,7 +10,7 @@ analysis of time-to-first-token, inter-token latency, and token generation rates
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, computed_field
 
@@ -66,6 +66,14 @@ class GenerativeRequestStats(StandardBaseDict):
         default_factory=dict,
         description=(
             "Quality scores for this request keyed by scorer name. "
+            "Populated only when scorers are configured on the benchmark."
+        ),
+    )
+    score_details: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-scorer diagnostic details keyed by scorer name "
+            "(match kind, thinking-strip flags, scorer errors). "
             "Populated only when scorers are configured on the benchmark."
         ),
     )

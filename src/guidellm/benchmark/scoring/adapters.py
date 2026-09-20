@@ -18,16 +18,34 @@ DEFAULT_TAGS = ("think", "reasoning", "thought", "scratchpad")
 
 
 def _strip_blocks(text: str, tags: tuple[str, ...]) -> tuple[str, bool]:
-    """Remove reasoning blocks. Returns (cleaned, any_block_removed)."""
+    """Remove reasoning blocks. Returns (cleaned, any_block_removed).
+
+    Handles ``<tag>...</tag>`` spans (case-insensitive), true nesting
+    (innermost pairs removed first via a tempered pattern, repeated to a
+    fixpoint), orphan closing tags left by malformed nesting, unclosed
+    opening tags (stripped to end of text), and fenced `````thinking```
+    blocks. Collapses leftover blank lines. No-op when no blocks present.
+    """
     stripped_any = False
     stripped = text
     for tag in tags:
-        # Paired spans first (non-greedy, DOTALL, case-insensitive)
+        # Innermost paired spans first: the tempered content cannot contain
+        # another open/close of the same tag, so nested spans collapse
+        # inside-out. Repeated to a fixpoint.
+        inner = (
+            r"<" + tag + r"\b[^>]*>"
+            r"(?:(?!</?" + tag + r"\b).)*?"
+            r"</" + tag + r"\s*>"
+        )
+        while True:
+            new, n = re.subn(inner, "", stripped, flags=re.IGNORECASE | re.DOTALL)
+            stripped_any = stripped_any or n > 0
+            if n == 0:
+                break
+            stripped = new
+        # Orphan closing tags (malformed/nesting residue): remove the tag.
         new, n = re.subn(
-            r"<" + tag + r"\b[^>]*>.*?</" + tag + r"\s*>",
-            "",
-            stripped,
-            flags=re.IGNORECASE | re.DOTALL,
+            r"</" + tag + r"\s*>", "", stripped, flags=re.IGNORECASE
         )
         stripped, stripped_any = new, stripped_any or n > 0
         # Unclosed opening tag: strip to end of text
@@ -39,13 +57,17 @@ def _strip_blocks(text: str, tags: tuple[str, ...]) -> tuple[str, bool]:
         )
         stripped, stripped_any = new, stripped_any or n > 0
     # Fenced thinking blocks: ```thinking ... ```
-    new, n = re.subn(
-        r"```\s*thinking\b.*?```",
-        "",
-        stripped,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    stripped, stripped_any = new, stripped_any or n > 0
+    while True:
+        new, n = re.subn(
+            r"```\s*thinking\b.*?```",
+            "",
+            stripped,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        stripped_any = stripped_any or n > 0
+        if n == 0:
+            break
+        stripped = new
     # Collapse leftover blank lines, then trim ends
     stripped = re.sub(r"\n{3,}", "\n\n", stripped).strip()
     return stripped, stripped_any

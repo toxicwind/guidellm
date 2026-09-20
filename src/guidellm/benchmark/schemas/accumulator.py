@@ -928,23 +928,35 @@ class GenerativeBenchmarkAccumulator(
         """Run configured scorers on one request's output.
 
         Scoring failures never fail the benchmark: the request records 0.0
-        for that scorer. Aggregate totals are updated here so they survive
-        output clearing and reservoir sampling.
+        for that scorer, the zero contributes to the aggregates, and the
+        error is persisted in ``stats.score_details``. Empty or missing
+        output is scored normally (deterministic scorers grade it 0.0) --
+        absence of a response is itself a measurement. Aggregate totals are
+        updated here so they survive output clearing and reservoir sampling.
         """
-        if not self._scorers or not stats.output:
+        if not self._scorers:
             return
         for scorer in self._scorers:
             try:
-                result = scorer.score(stats.output)
-            except Exception:  # noqa: BLE001 - scoring must not fail a benchmark
+                result = scorer.score(stats.output or "")
+            except Exception as exc:  # noqa: BLE001 - scoring must not fail a benchmark
                 stats.scores[scorer.name] = 0.0
+                stats.score_details[scorer.name] = {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "score": 0.0,
+                }
+                self._update_quality_total(scorer.name, 0.0)
                 continue
             stats.scores[result.name] = result.score
-            total = self.quality_totals.setdefault(
-                result.name,
-                {"sum": 0.0, "min": float("inf"), "max": float("-inf"), "n": 0.0},
-            )
-            total["sum"] += result.score
-            total["n"] += 1.0
-            total["min"] = min(total["min"], result.score)
-            total["max"] = max(total["max"], result.score)
+            stats.score_details[result.name] = dict(result.details)
+            self._update_quality_total(result.name, result.score)
+
+    def _update_quality_total(self, name: str, score: float) -> None:
+        total = self.quality_totals.setdefault(
+            name,
+            {"sum": 0.0, "min": float("inf"), "max": float("-inf"), "n": 0.0},
+        )
+        total["sum"] += score
+        total["n"] += 1.0
+        total["min"] = min(total["min"], score)
+        total["max"] = max(total["max"], score)

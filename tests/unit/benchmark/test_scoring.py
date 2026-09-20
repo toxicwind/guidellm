@@ -104,9 +104,25 @@ def test_strip_thinking_blocks_non_greedy():
 
 
 def test_strip_thinking_blocks_nested_same_tag():
-    # Non-greedy (documented): the first complete span is removed.
+    # True nesting: innermost spans collapse first, the whole nested
+    # block is thinking content.
     text = "<think>a <think>b</think> c</think> done"
-    assert strip_thinking_blocks(text) == "c</think> done"
+    assert strip_thinking_blocks(text) == "done"
+
+
+def test_strip_thinking_blocks_deeply_nested():
+    text = "<think>a <think>b <think>c</think> d</think> e</think> X"
+    assert strip_thinking_blocks(text) == "X"
+
+
+def test_strip_thinking_blocks_orphan_closing_tag_removed():
+    # Malformed residue: a lone closing tag is not answer content.
+    assert strip_thinking_blocks("c</think> done") == "c done"
+
+
+def test_strip_thinking_blocks_nested_keeps_between_blocks():
+    text = "<think>one</think> keep <think>two <think>nested</think></think>"
+    assert strip_thinking_blocks(text) == "keep"
 
 
 def test_strip_thinking_blocks_unclosed_tag_strips_to_end():
@@ -250,7 +266,9 @@ def _make_accumulator(scorers):
 def _make_stats(output):
     from guidellm.schemas.base.request_stats import GenerativeRequestStats
 
-    return GenerativeRequestStats.model_construct(output=output, scores={})
+    return GenerativeRequestStats.model_construct(
+        output=output, scores={}, score_details={}
+    )
 
 
 def test_score_request_records_scores_and_totals():
@@ -275,12 +293,22 @@ def test_score_request_accumulates_min_max():
     assert total["max"] == 2.0
 
 
-def test_score_request_no_output_is_noop():
+def test_score_request_empty_output_scores_zero():
+    acc = _make_accumulator([InstructionFollowingScorer(sentinel=SENTINEL)])
+    stats = _make_stats("")
+    acc._score_request(stats)
+    assert stats.scores == {"instruction_following": 0.0}
+    assert stats.score_details["instruction_following"]["match"] == "none"
+    total = acc.quality_totals["instruction_following"]
+    assert total["n"] == 1.0 and total["sum"] == 0.0
+
+
+def test_score_request_none_output_scores_zero():
     acc = _make_accumulator([InstructionFollowingScorer(sentinel=SENTINEL)])
     stats = _make_stats(None)
     acc._score_request(stats)
-    assert stats.scores == {}
-    assert acc.quality_totals == {}
+    assert stats.scores == {"instruction_following": 0.0}
+    assert acc.quality_totals["instruction_following"]["n"] == 1.0
 
 
 def test_score_request_no_scorers_is_noop():
@@ -302,7 +330,34 @@ def test_score_request_failure_records_zero_not_raise():
     stats = _make_stats(SENTINEL)
     acc._score_request(stats)  # must not raise
     assert stats.scores == {"exploding": 0.0}
-    assert "exploding" not in acc.quality_totals
+    # the zero contributes to aggregates ...
+    total = acc.quality_totals["exploding"]
+    assert total == {"sum": 0.0, "min": 0.0, "max": 0.0, "n": 1.0}
+    # ... and the error is persisted in the request's details
+    assert "boom" in stats.score_details["exploding"]["error"]
+
+
+def test_score_request_persists_details():
+    acc = _make_accumulator(
+        [ThinkingBlockStripper(InstructionFollowingScorer(sentinel=SENTINEL))]
+    )
+    stats = _make_stats("<think>deliberation</think>" + SENTINEL)
+    acc._score_request(stats)
+    details = stats.score_details["instruction_following_nothink"]
+    assert details["match"] == "exact"
+    assert details["stripped"] is True
+    assert details["chars_removed"] > 0
+
+
+def test_no_scorer_request_shape_empty():
+    # No scorers configured: scores and details stay empty, request shape
+    # is untouched.
+    acc = _make_accumulator([])
+    stats = _make_stats(SENTINEL)
+    acc._score_request(stats)
+    assert stats.scores == {}
+    assert stats.score_details == {}
+    assert acc.quality_totals == {}
 
 
 # ---------------------------------------------------------------------------
