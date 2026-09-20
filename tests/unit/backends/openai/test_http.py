@@ -285,6 +285,14 @@ class TestOpenAIHTTPBackend:
         )
         assert backend._args.validate_backend == expected_validate_backend
 
+    @pytest.mark.smoke
+    def test_openai_strict_compat_parameter(self):
+        """Test openai_strict_compat defaults False and stores True."""
+        backend = _make_backend(target="http://test")
+        assert backend._args.openai_strict_compat is False
+        backend = _make_backend(target="http://test", openai_strict_compat=True)
+        assert backend._args.openai_strict_compat is True
+
     @pytest.mark.sanity
     def test_target_normalization(self):
         """Test target URL normalization."""

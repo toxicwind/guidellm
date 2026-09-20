@@ -110,6 +110,15 @@ class OpenAIHTTPBackendArgs(BackendArgs):
             "request kwargs. False skips validation."
         ),
     )
+    openai_strict_compat: bool = Field(
+        default=False,
+        description=(
+            "Omit provider-specific request fields that strict OpenAI-compatible "
+            "servers reject: 'continuous_usage_stats' inside stream_options "
+            "(Mistral 422, Gemini 400) and vLLM-only 'ignore_eos' (Mistral 422, "
+            "Gemini 400). Enable for Mistral, Gemini, and similar strict servers."
+        ),
+    )
     stream: bool = Field(
         default=True,
         description="Use streaming responses for generation requests when supported.",

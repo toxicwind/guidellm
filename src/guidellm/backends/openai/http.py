@@ -260,6 +260,7 @@ class OpenAIHTTPBackend(Backend):
             max_tokens=self._args.max_tokens,
             server_history=self._args.server_history,
             multiturn_reasoning=self._args.multiturn_reasoning,
+            openai_strict_compat=self._args.openai_strict_compat,
         )
 
         request_url = f"{self._args.target}/{request_path}"

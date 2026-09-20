@@ -1048,14 +1048,17 @@ class ChatCompletionsRequestHandler(TextCompletionsRequestHandler):
         if kwargs.get("model") is not None:
             arguments.body["model"] = kwargs["model"]
 
+        strict_compat = kwargs.get("openai_strict_compat", False)
+
         # Configure streaming
         if kwargs.get("stream"):
             arguments.stream = True
             arguments.body["stream"] = True
-            arguments.body["stream_options"] = {
-                "include_usage": True,
-                "continuous_usage_stats": True,
-            }
+            arguments.body["stream_options"] = {"include_usage": True}
+            if not strict_compat:
+                # OpenAI-ism: strict servers (Mistral, Gemini) reject this with
+                # 422/400 as an unknown field.
+                arguments.body["stream_options"]["continuous_usage_stats"] = True
 
         # Handle output tokens
         if data.output_metrics.text_tokens:
@@ -1063,9 +1066,12 @@ class ChatCompletionsRequestHandler(TextCompletionsRequestHandler):
                 {
                     "max_completion_tokens": data.output_metrics.text_tokens,
                     "stop": None,
-                    "ignore_eos": True,
                 }
             )
+            if not strict_compat:
+                # vLLM-only: strict servers (Mistral, Gemini) reject this with
+                # 422/400 as an unknown field.
+                arguments.body["ignore_eos"] = True
         elif kwargs.get("max_tokens") is not None:
             arguments.body["max_completion_tokens"] = kwargs["max_tokens"]
 

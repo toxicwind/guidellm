@@ -949,6 +949,34 @@ class TestChatCompletionsRequestHandler:
         assert result.body["stream_options"]["continuous_usage_stats"] is True
 
     @pytest.mark.sanity
+    def test_format_strict_compat_omits_provider_fields(self, valid_instances):
+        """Strict compat drops fields strict servers reject (Mistral/Gemini 422/400)."""
+        instance = valid_instances
+        data = GenerationRequest(
+            output_metrics=UsageMetrics(text_tokens=100),
+        )
+
+        result = instance.format(data, stream=True, openai_strict_compat=True)
+
+        assert result.body["stream_options"] == {"include_usage": True}
+        assert "continuous_usage_stats" not in result.body["stream_options"]
+        assert "ignore_eos" not in result.body
+        assert result.body["max_completion_tokens"] == 100
+
+    @pytest.mark.sanity
+    def test_format_non_strict_keeps_provider_fields(self, valid_instances):
+        """Default (non-strict) keeps vLLM/OpenAI-specific fields."""
+        instance = valid_instances
+        data = GenerationRequest(
+            output_metrics=UsageMetrics(text_tokens=100),
+        )
+
+        result = instance.format(data, stream=True)
+
+        assert result.body["stream_options"]["continuous_usage_stats"] is True
+        assert result.body["ignore_eos"] is True
+
+    @pytest.mark.sanity
     def test_format_output_tokens(self, valid_instances):
         """Test format method with max_completion_tokens.
 
