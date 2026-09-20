@@ -67,6 +67,64 @@ This section summarizes the newest capabilities available to users and outlines 
 - Ability to override constraints for individual benchmarks in a profile.
 - gRPC backend for benchmarking vLLM-native servers.
 
+## Response Scoring (fork addition)
+
+This fork adds **pluggable deterministic response scoring** on top of
+GuideLLM's performance metrics. GuideLLM natively measures latency,
+throughput, and token distributions; it never inspects response *content*.
+The scoring layer closes that gap: every completed request is scored,
+per-request scores are persisted, and quality aggregates are reported
+alongside the performance numbers.
+
+### Scorers
+
+- `guidellm.benchmark.scoring.protocol` — the `Scorer` protocol
+  (`name`, `score(output, expected=None, context=None) ->
+  ScorerResult(score, details)`).
+- `guidellm.benchmark.scoring.registry` — `register_scorer` /
+  `get_scorer`; scorers are referenced by name in scenario config.
+- `guidellm.benchmark.scoring.instruction.InstructionFollowingScorer` —
+  deterministic sentinel scoring: exact normalized match = `2.0`,
+  sentinel present with extra text = `1.0`, missing/empty/error = `0.0`.
+- `guidellm.benchmark.scoring.adapters.ThinkingBlockStripper` — composable
+  adapter that strips `<think>`, `<reasoning>`, `<thought>`,
+  `<scratchpad>`, and fenced thinking blocks (true nesting innermost-first,
+  orphan closers removed, unclosed openers strip to end of output) before
+  delegating to the wrapped scorer. Reports under
+  `<scorer>_nothink` with `stripped: bool` in details.
+
+### Wiring it in a scenario
+
+```yaml
+metrics:
+  kind: generative
+  scorers: ["instruction_following"]
+  scorer_config:
+    instruction_following:
+      sentinel: "ABSTRACT-7X3Q"
+      strip_thinking: true
+```
+
+### Semantics and report fields
+
+- Every terminal request is scored for its per-request record:
+  `RequestStats.scores` and `RequestStats.score_details`. Empty output on a
+  completed request scores `0.0` (model silence is data). A scorer
+  exception records `0.0` plus `error: "TypeName: message"` in details and
+  never aborts the run.
+- **Quality aggregates cover completed requests only.**
+  Transport/provider-errored requests are scored for the record but
+  excluded from `quality_totals` — provider failures are reliability
+  signal, not instruction-following signal.
+- Benchmark reports gain `quality: {<scorer>: {mean, min, max, n}}` and
+  `quality_instrument: {scorer, semantics, thinking_strip, tokenizers,
+  ...}` identifying the instrument, scope, and formality tier.
+- With no scorers configured, reports serialize exactly as upstream
+  (scoring fields default to empty and are additive-only).
+
+Upstream: [vllm-project/guidellm](https://github.com/vllm-project/guidellm).
+Fork: [toxicwind/guidellm](https://github.com/toxicwind/guidellm).
+
 ## Quick Start
 
 The Quick Start shows how to install GuideLLM, launch a server, and run your first benchmark in a few minutes.
