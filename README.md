@@ -80,7 +80,10 @@ alongside the performance numbers.
 
 - `guidellm.benchmark.scoring.protocol` — the `Scorer` protocol
   (`name`, `score(output, expected=None, context=None) ->
-  ScorerResult(score, details)`).
+  ScorerResult(score, details)`). `expected`, when supplied, overrides
+  scorer defaults (e.g. the instruction_following sentinel); benchmark
+  execution will pass it through once request datasets carry reference
+  outputs (no such field exists in the request schema yet).
 - `guidellm.benchmark.scoring.registry` — `register_scorer` /
   `get_scorer`; scorers are referenced by name in scenario config.
 - `guidellm.benchmark.scoring.instruction.InstructionFollowingScorer` —
